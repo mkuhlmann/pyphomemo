@@ -40,8 +40,9 @@ MAC) set via env or `--addr`.
 ```
 src/pyphomemo/
   protocol.py   M110 wire protocol: command-byte builders, GATT UUIDs, constants
+  models.py     PrinterModel registry + scan detection (identify_model)
   imaging.py    Pillow rendering: text/image -> 1bpp raster; mm<->px, label sizing
-  printer.py    bleak BLE transport: PhomemoPrinter, scan(), structured send
+  printer.py    bleak BLE transport: PhomemoPrinter, scan(), discover, structured send
   api.py        High-level async print_text() / print_image() (connect+render+print)
   cli.py        Typer commands: print-text, print-image, scan, serve, --version
   server.py     FastAPI app: endpoints, JobQueue worker, Jinja2 status page
@@ -54,8 +55,15 @@ references/                  Reverse-engineering sources (read-only; see below)
 ```
 
 Import direction is one-way: `cli`/`server`/`api` → `imaging` + `printer` →
-`protocol`. Keep it that way (no cycles); `protocol` and `imaging` must stay
-hardware-free so rendering works without bleak/a printer.
+`models` → `protocol`. Keep it that way (no cycles); `protocol`, `models` and
+`imaging` must stay hardware-free so rendering/detection work without bleak/a
+printer.
+
+**Adding a printer model**: register a `PrinterModel` in `models.py` (name,
+`width_px`, advertised `name_prefixes`, `supported`). Until its protocol is
+implemented keep `supported=False` so scans *name* it but the CLI warns instead
+of mis-driving it with the M110 command bytes. Real support means giving the
+model its own command/send hooks (today the M-series bytes live in `protocol.py`).
 
 ## M110 protocol facts (don't relearn these the hard way)
 

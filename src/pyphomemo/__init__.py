@@ -22,8 +22,16 @@ Protocol/constants are available via ``pyphomemo.protocol``.
 
 from __future__ import annotations
 
-from . import imaging, protocol
+from . import imaging, models, protocol
 from .api import print_image, print_text
+from .models import (
+    DEFAULT_MODEL,
+    MODELS,
+    PrinterModel,
+    get_model,
+    identify_model,
+    is_phomemo_name,
+)
 from .imaging import (
     PX_PER_MM,
     image_to_raster,
@@ -40,7 +48,7 @@ from .printer import (
     PhomemoPrinter,
     PrinterError,
     ScanResult,
-    is_phomemo_name,
+    discover_printer,
     print_raster,
     resolve_address,
     scan,
@@ -60,14 +68,21 @@ __all__ = [
     "print_text",
     "print_image",
     "scan",
+    "discover_printer",
     # transport
     "PhomemoPrinter",
     "print_raster",
     "resolve_address",
     "PrinterError",
     "ScanResult",
-    "is_phomemo_name",
     "ENV_ADDR",
+    # models / detection
+    "PrinterModel",
+    "MODELS",
+    "DEFAULT_MODEL",
+    "get_model",
+    "identify_model",
+    "is_phomemo_name",
     # rendering
     "text_to_raster",
     "image_to_raster",
@@ -83,4 +98,5 @@ __all__ = [
     "PX_PER_MM",
     "protocol",
     "imaging",
+    "models",
 ]

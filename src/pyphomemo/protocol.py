@@ -38,13 +38,6 @@ KNOWN_SERVICE_UUIDS = frozenset(
     }
 )
 
-# Phomemo model-name prefixes some printers advertise (others advertise only a
-# bare serial number, e.g. "Q199E45K1480927" — see is_phomemo_name).
-MODEL_NAME_PREFIXES = (
-    "M02", "M04", "M110", "M120", "M200", "M220", "M260",
-    "T02", "D30", "D110", "P12", "PM-",
-)
-
 # --- Physical characteristics ------------------------------------------------
 PRINTER_WIDTH_PX = 384          # print head width in dots
 BYTES_PER_LINE = PRINTER_WIDTH_PX // 8  # = 48

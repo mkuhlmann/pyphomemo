@@ -13,12 +13,16 @@ uv sync
 
 ## Printer address
 
-Every command needs the printer's BLE MAC address. Supply it with `--addr` or the
-`PHOMEMO_ADDR` environment variable.
+Supply the printer's BLE MAC with `--addr` or the `PHOMEMO_ADDR` environment
+variable. If you set **neither**, the command **auto-discovers** the printer by
+scanning (and prints a tip to set `PHOMEMO_ADDR` so future prints skip the ~8 s
+scan).
 
 ```bash
 phomemo scan                     # lists nearby devices, flags the M110 printer
 export PHOMEMO_ADDR=AA:BB:CC:DD:EE:FF
+
+phomemo print-text "Hi"          # works with no address set — discovers, prints, hints
 ```
 
 ## CLI
@@ -94,14 +98,15 @@ async def batch(addr, texts):
 asyncio.run(batch("12:CB:A3:08:0F:34", ["A-1", "A-2", "A-3"]))
 ```
 
-Exported names: `print_text`, `print_image`, `scan`, `ScanResult`,
-`is_phomemo_name`, `PhomemoPrinter`, `print_raster`, `resolve_address`,
-`PrinterError`, `ENV_ADDR`, the rendering
+Exported names: `print_text`, `print_image`, `scan`, `discover_printer`,
+`ScanResult`, `PhomemoPrinter`, `print_raster`, `resolve_address`,
+`PrinterError`, `ENV_ADDR`; the model API (`PrinterModel`, `MODELS`,
+`DEFAULT_MODEL`, `get_model`, `identify_model`, `is_phomemo_name`); the rendering
 helpers (`text_to_raster`, `image_to_raster`, `text_to_image`, `label_to_px`,
-`parse_label_size`, `mm_to_px`, `load_image`, `load_font`), constants
-(`PRINTER_WIDTH_PX`, `BYTES_PER_LINE`, `PX_PER_MM`), and the `protocol` /
-`imaging` submodules. Rendering helpers need no hardware — handy for previews
-and tests.
+`parse_label_size`, `mm_to_px`, `load_image`, `load_font`); constants
+(`PRINTER_WIDTH_PX`, `BYTES_PER_LINE`, `PX_PER_MM`); and the `protocol` /
+`imaging` / `models` submodules. Rendering and detection helpers need no
+hardware — handy for previews and tests.
 
 ## Standalone binary
 

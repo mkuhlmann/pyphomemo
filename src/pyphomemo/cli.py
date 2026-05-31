@@ -8,7 +8,7 @@ from typing import Optional
 
 import typer
 
-from . import imaging, printer, protocol
+from . import imaging, models, printer, protocol
 
 app = typer.Typer(
     add_completion=False,
@@ -50,7 +50,38 @@ def _label_width(label: str) -> int:
         raise typer.Exit(code=2)
 
 
+def _resolve_addr(addr: Optional[str]) -> str:
+    """Use the given/env address, or auto-discover and hint how to skip it."""
+    if addr:
+        return addr
+    typer.secho("No printer address set — scanning for a Phomemo printer...", fg=typer.colors.YELLOW, err=True)
+    found = asyncio.run(printer.discover_printer())
+    if found is None:
+        typer.secho(
+            "No Phomemo printer found nearby. Pass --addr or set PHOMEMO_ADDR "
+            "(run `phomemo scan` to list devices).",
+            fg=typer.colors.RED, err=True,
+        )
+        raise typer.Exit(code=1)
+    rssi = f" ({found.rssi} dBm)" if found.rssi is not None else ""
+    model = found.model or "Phomemo"
+    typer.secho(f"Found {model} {found.name} at {found.address}{rssi}.", fg=typer.colors.GREEN, err=True)
+    detected = models.get_model(found.model)
+    if detected is not None and not detected.supported:
+        typer.secho(
+            f"Warning: {detected.name} uses a protocol pyphomemo doesn't support yet; "
+            "the print may be garbled. Only the M110-series is supported.",
+            fg=typer.colors.YELLOW, err=True,
+        )
+    typer.secho(
+        f"Tip: set PHOMEMO_ADDR={found.address} (or pass --addr) to skip this scan next time.",
+        fg=typer.colors.CYAN, err=True,
+    )
+    return found.address
+
+
 def _run_print(raster: bytes, height: int, width: int, addr: Optional[str], speed: int, density: int, media: int, debug: bool = False) -> None:
+    addr = _resolve_addr(addr)
     try:
         asyncio.run(
             printer.print_raster(
@@ -148,7 +179,11 @@ def scan(
         rssi = f"{d.rssi:>4} dBm" if d.rssi is not None else "        "
         line = f"  {d.address}  {rssi}  {d.name}"
         if d.is_phomemo:
-            typer.secho(f"{line}   ← Phomemo printer", fg=typer.colors.GREEN)
+            m = models.get_model(d.model)
+            tag = f"← Phomemo {d.model or 'printer'}"
+            if m is not None and not m.supported:
+                tag += " (unsupported)"
+            typer.secho(f"{line}   {tag}", fg=typer.colors.GREEN)
         else:
             typer.echo(line)
 
@@ -174,11 +209,11 @@ def serve(
     import os
     import uvicorn
 
-    if addr:
-        os.environ[printer.ENV_ADDR] = addr
-    # Resolve early so we fail fast with a clear message.
-    printer.resolve_address(addr)
-    typer.echo(f"Serving on http://{host}:{port}  (printer {os.environ[printer.ENV_ADDR]})")
+    # Resolve (or discover) the address up front so the worker has it and we
+    # fail fast with a clear message.
+    addr = _resolve_addr(addr)
+    os.environ[printer.ENV_ADDR] = addr
+    typer.echo(f"Serving on http://{host}:{port}  (printer {addr})")
     uvicorn.run("pyphomemo.server:app", host=host, port=port)
 
 

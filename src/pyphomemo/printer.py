@@ -19,6 +19,7 @@ from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
 
 from . import protocol
+from .models import DEFAULT_MODEL, PrinterModel, get_model, identify_model, is_phomemo_name
 
 ENV_ADDR = "PHOMEMO_ADDR"
 
@@ -52,52 +53,44 @@ def resolve_address(addr: str | None) -> str:
 
 @dataclass
 class ScanResult:
-    """A discovered BLE device. ``is_phomemo`` flags a likely Phomemo printer."""
+    """A discovered BLE device.
+
+    ``model`` is the detected Phomemo model name (e.g. ``"M110"``) or None;
+    ``is_phomemo`` is simply ``model is not None``.
+    """
 
     address: str
     name: str
     rssi: int | None = None
     is_phomemo: bool = False
-
-
-def is_phomemo_name(name: str | None) -> bool:
-    """Heuristic: does this advertised name look like a Phomemo printer?
-
-    Matches known model prefixes (M110, T02, ...) and the bare alphanumeric
-    serial numbers some units advertise instead (e.g. "Q199E45K1234567").
-    """
-    if not name:
-        return False
-    n = name.strip()
-    if n.upper().startswith(protocol.MODEL_NAME_PREFIXES):
-        return True
-    # Serial-like: 10–18 chars, all-caps alphanumerics mixing letters and digits.
-    return (
-        10 <= len(n) <= 18
-        and n.isalnum()
-        and n == n.upper()
-        and any(c.isdigit() for c in n)
-        and any(c.isalpha() for c in n)
-    )
+    model: str | None = None
 
 
 async def scan(timeout: float = 8.0) -> list[ScanResult]:
-    """Discover nearby BLE devices, flagging likely Phomemo printers.
+    """Discover nearby BLE devices, identifying likely Phomemo printers.
 
-    Detection uses the advertised Phomemo service UUID first and falls back to
-    the device name. Results are sorted printers-first, then by signal strength.
+    Each result's ``model`` is resolved from the advertised name / service UUIDs
+    (see :func:`pyphomemo.models.identify_model`). Results are sorted
+    printers-first, then by signal strength.
     """
     found = await BleakScanner.discover(timeout=timeout, return_adv=True)
     results: list[ScanResult] = []
     for dev, adv in found.values():
         name = dev.name or adv.local_name or "(unknown)"
-        advertised = {u.lower() for u in (adv.service_uuids or [])}
-        is_phomemo = bool(advertised & protocol.KNOWN_SERVICE_UUIDS) or is_phomemo_name(
-            dev.name or adv.local_name
+        model = identify_model(dev.name or adv.local_name, adv.service_uuids or [])
+        results.append(
+            ScanResult(dev.address, name, adv.rssi, model is not None, model.name if model else None)
         )
-        results.append(ScanResult(dev.address, name, adv.rssi, is_phomemo))
     results.sort(key=lambda r: (not r.is_phomemo, -(r.rssi if r.rssi is not None else -999)))
     return results
+
+
+async def discover_printer(timeout: float = 8.0) -> ScanResult | None:
+    """Scan and return the strongest likely-Phomemo printer, or None."""
+    for result in await scan(timeout):
+        if result.is_phomemo:
+            return result
+    return None
 
 
 def _log(debug: bool, msg: str) -> None:
@@ -108,8 +101,17 @@ def _log(debug: bool, msg: str) -> None:
 class PhomemoPrinter:
     """Connect to an M110 and run a structured print job over GATT."""
 
-    def __init__(self, address: str | None = None, *, debug: bool = False):
-        self.address = resolve_address(address)
+    def __init__(
+        self,
+        address: str | None = None,
+        *,
+        model: PrinterModel = DEFAULT_MODEL,
+        debug: bool = False,
+    ):
+        # May be None: resolved from PHOMEMO_ADDR or BLE discovery at connect().
+        self.address = address or os.environ.get(ENV_ADDR)
+        self.model = model
+        self.discovered = False
         self._client: BleakClient | None = None
         self._char = protocol.WRITE_CHAR_UUID
         self._debug = debug
@@ -120,6 +122,19 @@ class PhomemoPrinter:
         return self._client is not None and self._client.is_connected
 
     async def connect(self, timeout: float = 20.0, retries: int = CONNECT_RETRIES) -> None:
+        if not self.address:
+            _log(self._debug, "no address set; discovering a printer ...")
+            found = await discover_printer()
+            if found is None:
+                raise PrinterError(
+                    "No printer address given and no Phomemo printer found "
+                    f"nearby. Pass --addr or set the {ENV_ADDR} env var."
+                )
+            self.address = found.address
+            self.discovered = True
+            self.model = get_model(found.model) or self.model
+            _log(self._debug, f"discovered {found.model or 'Phomemo'} {found.name} at {found.address}")
+
         last_exc: Exception | None = None
         for attempt in range(1, retries + 1):
             target = self.address
