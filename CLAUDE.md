@@ -73,6 +73,12 @@ hardware-free so rendering works without bleak/a printer.
 - **Bitmap packing**: 1 bpp, MSB = leftmost pixel, bit set = black. Pillow `"1"`
   mode packs MSB-first with 0=black, so the source is inverted (`ImageOps.invert`)
   before `convert("1")` (matches phomemo-tools `rastertopm110`).
+- **Reconnecting after a print**: the M110 is dual-mode and drops BLE briefly
+  while finishing a job; an immediate reconnect by bare MAC makes BlueZ fall back
+  to the classic profile (`br-connection-profile-unavailable`). `connect()`
+  retries with backoff and, from the 2nd attempt, resolves the device via an LE
+  scan (`find_device_by_address`) to force the LE transport. Don't "simplify"
+  this back to a single direct connect.
 
 ## Conventions
 

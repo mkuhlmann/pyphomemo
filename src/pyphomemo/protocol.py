@@ -27,6 +27,24 @@ SERVICE_UUID = "0000ff00-0000-1000-8000-00805f9b34fb"
 WRITE_CHAR_UUID = "0000ff02-0000-1000-8000-00805f9b34fb"
 NOTIFY_CHAR_UUID = "0000ff03-0000-1000-8000-00805f9b34fb"
 
+# Service UUIDs advertised by various Phomemo models (phomymo constants.js).
+# Used to recognise a printer during a scan.
+KNOWN_SERVICE_UUIDS = frozenset(
+    {
+        "0000ff00-0000-1000-8000-00805f9b34fb",
+        "0000ffe0-0000-1000-8000-00805f9b34fb",
+        "0000ae30-0000-1000-8000-00805f9b34fb",
+        "49535343-fe7d-4ae5-8fa9-9fafd205e455",
+    }
+)
+
+# Phomemo model-name prefixes some printers advertise (others advertise only a
+# bare serial number, e.g. "Q199E45K1480927" — see is_phomemo_name).
+MODEL_NAME_PREFIXES = (
+    "M02", "M04", "M110", "M120", "M200", "M220", "M260",
+    "T02", "D30", "D110", "P12", "PM-",
+)
+
 # --- Physical characteristics ------------------------------------------------
 PRINTER_WIDTH_PX = 384          # print head width in dots
 BYTES_PER_LINE = PRINTER_WIDTH_PX // 8  # = 48

@@ -17,7 +17,7 @@ Every command needs the printer's BLE MAC address. Supply it with `--addr` or th
 `PHOMEMO_ADDR` environment variable.
 
 ```bash
-phomemo scan                     # discover nearby BLE devices, find the M110
+phomemo scan                     # lists nearby devices, flags the M110 printer
 export PHOMEMO_ADDR=AA:BB:CC:DD:EE:FF
 ```
 
@@ -79,8 +79,9 @@ from pyphomemo import print_text, print_image, scan, PhomemoPrinter
 asyncio.run(print_text("12:CB:A3:08:0F:34", "Box A-12", label="40x30", align="center"))
 asyncio.run(print_image("12:CB:A3:08:0F:34", "label.png", label="40x30"))
 
-# Discover printers
-print(asyncio.run(scan(timeout=8)))   # [(address, name), ...]
+# Discover printers (returns ScanResult: .address .name .rssi .is_phomemo)
+for d in asyncio.run(scan(timeout=8)):
+    print(d.address, d.name, "← printer" if d.is_phomemo else "")
 
 # Reuse one connection for several labels
 async def batch(addr, texts):
@@ -93,8 +94,9 @@ async def batch(addr, texts):
 asyncio.run(batch("12:CB:A3:08:0F:34", ["A-1", "A-2", "A-3"]))
 ```
 
-Exported names: `print_text`, `print_image`, `scan`, `PhomemoPrinter`,
-`print_raster`, `resolve_address`, `PrinterError`, `ENV_ADDR`, the rendering
+Exported names: `print_text`, `print_image`, `scan`, `ScanResult`,
+`is_phomemo_name`, `PhomemoPrinter`, `print_raster`, `resolve_address`,
+`PrinterError`, `ENV_ADDR`, the rendering
 helpers (`text_to_raster`, `image_to_raster`, `text_to_image`, `label_to_px`,
 `parse_label_size`, `mm_to_px`, `load_image`, `load_font`), constants
 (`PRINTER_WIDTH_PX`, `BYTES_PER_LINE`, `PX_PER_MM`), and the `protocol` /

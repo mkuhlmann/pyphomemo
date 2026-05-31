@@ -39,6 +39,8 @@ from .printer import (
     ENV_ADDR,
     PhomemoPrinter,
     PrinterError,
+    ScanResult,
+    is_phomemo_name,
     print_raster,
     resolve_address,
     scan,
@@ -63,6 +65,8 @@ __all__ = [
     "print_raster",
     "resolve_address",
     "PrinterError",
+    "ScanResult",
+    "is_phomemo_name",
     "ENV_ADDR",
     # rendering
     "text_to_raster",

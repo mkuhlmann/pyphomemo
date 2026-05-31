@@ -10,10 +10,13 @@ stream (no delays) causes the M110 to flash and discard the job.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import sys
+from dataclasses import dataclass
 
 from bleak import BleakClient, BleakScanner
+from bleak.exc import BleakError
 
 from . import protocol
 
@@ -23,6 +26,13 @@ ENV_ADDR = "PHOMEMO_ADDR"
 DELAY_INIT = 0.03
 DELAY_BEFORE_FOOTER = 0.30
 DELAY_AFTER_FOOTER = 0.50
+
+# Connecting again right after a print often fails on BlueZ with
+# `br-connection-profile-unavailable`: the M110 is a dual-mode device and, by
+# bare MAC, BlueZ falls back to the classic BR/EDR profile before the printer is
+# re-advertising over LE. We retry with backoff and, from the 2nd attempt, first
+# resolve the device via an LE scan so BlueZ uses the LE transport.
+CONNECT_RETRIES = 5
 
 
 class PrinterError(RuntimeError):
@@ -40,10 +50,54 @@ def resolve_address(addr: str | None) -> str:
     return resolved
 
 
-async def scan(timeout: float = 8.0) -> list[tuple[str, str]]:
-    """Discover nearby BLE devices; returns (address, name) tuples."""
-    devices = await BleakScanner.discover(timeout=timeout)
-    return [(d.address, d.name or "(unknown)") for d in devices]
+@dataclass
+class ScanResult:
+    """A discovered BLE device. ``is_phomemo`` flags a likely Phomemo printer."""
+
+    address: str
+    name: str
+    rssi: int | None = None
+    is_phomemo: bool = False
+
+
+def is_phomemo_name(name: str | None) -> bool:
+    """Heuristic: does this advertised name look like a Phomemo printer?
+
+    Matches known model prefixes (M110, T02, ...) and the bare alphanumeric
+    serial numbers some units advertise instead (e.g. "Q199E45K1234567").
+    """
+    if not name:
+        return False
+    n = name.strip()
+    if n.upper().startswith(protocol.MODEL_NAME_PREFIXES):
+        return True
+    # Serial-like: 10–18 chars, all-caps alphanumerics mixing letters and digits.
+    return (
+        10 <= len(n) <= 18
+        and n.isalnum()
+        and n == n.upper()
+        and any(c.isdigit() for c in n)
+        and any(c.isalpha() for c in n)
+    )
+
+
+async def scan(timeout: float = 8.0) -> list[ScanResult]:
+    """Discover nearby BLE devices, flagging likely Phomemo printers.
+
+    Detection uses the advertised Phomemo service UUID first and falls back to
+    the device name. Results are sorted printers-first, then by signal strength.
+    """
+    found = await BleakScanner.discover(timeout=timeout, return_adv=True)
+    results: list[ScanResult] = []
+    for dev, adv in found.values():
+        name = dev.name or adv.local_name or "(unknown)"
+        advertised = {u.lower() for u in (adv.service_uuids or [])}
+        is_phomemo = bool(advertised & protocol.KNOWN_SERVICE_UUIDS) or is_phomemo_name(
+            dev.name or adv.local_name
+        )
+        results.append(ScanResult(dev.address, name, adv.rssi, is_phomemo))
+    results.sort(key=lambda r: (not r.is_phomemo, -(r.rssi if r.rssi is not None else -999)))
+    return results
 
 
 def _log(debug: bool, msg: str) -> None:
@@ -65,22 +119,54 @@ class PhomemoPrinter:
     def connected(self) -> bool:
         return self._client is not None and self._client.is_connected
 
-    async def connect(self, timeout: float = 20.0) -> None:
-        _log(self._debug, f"connecting to {self.address} ...")
-        self._client = BleakClient(self.address, timeout=timeout)
-        await self._client.connect()
-        _log(self._debug, "connected")
-        self._dump_services()
-        if not self._has_char(self._char):
-            found = self._discover_write_char()
-            if found is None:
-                raise PrinterError(
-                    "No writable GATT characteristic found. Run with --debug to "
-                    "inspect the printer's services."
-                )
-            _log(self._debug, f"write char {self._char} absent; using {found}")
-            self._char = found
-        await self._subscribe_notify()
+    async def connect(self, timeout: float = 20.0, retries: int = CONNECT_RETRIES) -> None:
+        last_exc: Exception | None = None
+        for attempt in range(1, retries + 1):
+            target = self.address
+            # After a failed direct attempt, resolve via an LE scan so BlueZ uses
+            # the LE transport instead of the BR/EDR fallback that yields
+            # `br-connection-profile-unavailable`.
+            if attempt > 1:
+                _log(self._debug, f"resolving {self.address} via LE scan ...")
+                with contextlib.suppress(Exception):
+                    dev = await BleakScanner.find_device_by_address(
+                        self.address, timeout=min(timeout, 10.0)
+                    )
+                    if dev is not None:
+                        target = dev
+            try:
+                _log(self._debug, f"connecting to {self.address} (attempt {attempt}/{retries}) ...")
+                self._client = BleakClient(target, timeout=timeout)
+                await self._client.connect()
+                _log(self._debug, "connected")
+                self._dump_services()
+                if not self._has_char(self._char):
+                    found = self._discover_write_char()
+                    if found is None:
+                        raise PrinterError(
+                            "No writable GATT characteristic found. Run with "
+                            "--debug to inspect the printer's services."
+                        )
+                    _log(self._debug, f"write char {self._char} absent; using {found}")
+                    self._char = found
+                await self._subscribe_notify()
+                return
+            except PrinterError:
+                raise
+            except (BleakError, EOFError, OSError, asyncio.TimeoutError) as exc:
+                last_exc = exc
+                self._client = None
+                if attempt == retries:
+                    break
+                delay = min(1.5 * attempt, 6.0)
+                _log(self._debug, f"connect failed ({exc}); retrying in {delay:.1f}s")
+                await asyncio.sleep(delay)
+        raise PrinterError(
+            f"Could not connect to {self.address} after {retries} attempts: "
+            f"{last_exc}. If you just printed, the M110 is still busy — it drops "
+            "BLE briefly and BlueZ falls back to the classic profile "
+            "(br-connection-profile-unavailable). Wait a second and retry."
+        ) from last_exc
 
     def _dump_services(self) -> None:
         if not self._debug:

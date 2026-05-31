@@ -131,15 +131,37 @@ def print_image(
 
 
 @app.command()
-def scan(timeout: float = typer.Option(8.0, help="Scan duration in seconds.")):
-    """Scan for nearby Bluetooth LE devices to find the printer's MAC."""
+def scan(
+    timeout: float = typer.Option(8.0, help="Scan duration in seconds."),
+    all: bool = typer.Option(False, "--all", help="List every device, not just likely printers."),
+):
+    """Scan for nearby Bluetooth LE devices and flag likely Phomemo printers."""
     typer.echo(f"Scanning for {timeout:.0f}s...")
     devices = asyncio.run(printer.scan(timeout))
     if not devices:
         typer.echo("No devices found.")
         return
-    for address, name in devices:
-        typer.echo(f"  {address}  {name}")
+
+    printers = [d for d in devices if d.is_phomemo]
+    shown = devices if (all or not printers) else printers
+    for d in shown:
+        rssi = f"{d.rssi:>4} dBm" if d.rssi is not None else "        "
+        line = f"  {d.address}  {rssi}  {d.name}"
+        if d.is_phomemo:
+            typer.secho(f"{line}   ← Phomemo printer", fg=typer.colors.GREEN)
+        else:
+            typer.echo(line)
+
+    if not printers:
+        typer.secho(
+            "No Phomemo printer detected. Make sure it's on and not connected "
+            "elsewhere; pass --all to see every device.",
+            fg=typer.colors.YELLOW,
+        )
+    elif len(printers) == 1:
+        typer.echo(f"\nTip:  export PHOMEMO_ADDR={printers[0].address}")
+    if printers and not all and len(shown) < len(devices):
+        typer.echo(f"({len(devices) - len(shown)} other devices hidden; use --all to show them.)")
 
 
 @app.command()
