@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phomemo M110 Print Server</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 1.5rem; max-width: 760px; margin-inline: auto; }
+  h1 { font-size: 1.4rem; }
+  .addr { color: #888; font-size: .85rem; }
+  fieldset { border: 1px solid #8884; border-radius: 8px; margin-bottom: 1rem; }
+  legend { font-weight: 600; padding: 0 .4rem; }
+  label { display: block; margin: .4rem 0 .15rem; font-size: .85rem; }
+  input, textarea, select, button { font: inherit; padding: .4rem .5rem; border-radius: 6px; border: 1px solid #8886; box-sizing: border-box; }
+  input, textarea, select { width: 100%; }
+  .row { display: flex; gap: .6rem; }
+  .row > div { flex: 1; }
+  button { cursor: pointer; background: #2563eb; color: #fff; border: none; margin-top: .6rem; }
+  button:hover { background: #1d4ed8; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #8883; }
+  .s-queued { color: #b45309; } .s-printing { color: #2563eb; font-weight: 600; }
+  .s-done { color: #16a34a; } .s-error { color: #dc2626; }
+  .status-bar { font-size: .85rem; color: #888; margin-bottom: 1rem; }
+</style>
+</head>
+<body>
+  <h1>Phomemo M110 Print Server</h1>
+  <div class="addr">Printer: {{ printer_addr }}</div>
+  <div class="status-bar" id="statusbar">Loading status…</div>
+
+  <fieldset>
+    <legend>Print text</legend>
+    <label>Text</label>
+    <textarea id="t-text" rows="3" placeholder="Hello, world"></textarea>
+    <div class="row">
+      <div><label>Label (WxH mm)</label><input id="t-label" type="text" value="40x30"></div>
+      <div><label>Font size</label><input id="t-size" type="number" value="32"></div>
+      <div><label>Align</label>
+        <select id="t-align"><option>left</option><option>center</option><option>right</option></select>
+      </div>
+      <div><label>Density (1-15)</label><input id="t-density" type="number" value="15" min="1" max="15"></div>
+    </div>
+    <button onclick="printText()">Print text</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Print image</legend>
+    <label>Image file</label>
+    <input id="i-file" type="file" accept="image/*">
+    <div class="row">
+      <div><label>Label (WxH mm)</label><input id="i-label" type="text" value="40x30"></div>
+      <div><label>Threshold (blank = dither)</label><input id="i-threshold" type="number" min="0" max="255"></div>
+      <div><label>Density (1-15)</label><input id="i-density" type="number" value="15" min="1" max="15"></div>
+    </div>
+    <button onclick="printImage()">Print image</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Jobs</legend>
+    <table>
+      <thead><tr><th>#</th><th>Type</th><th>Label</th><th>Status</th><th>Size</th><th>Error</th></tr></thead>
+      <tbody id="jobs"></tbody>
+    </table>
+  </fieldset>
+
+<script>
+async function refresh() {
+  try {
+    const [jobs, status] = await Promise.all([
+      fetch('/api/jobs').then(r => r.json()),
+      fetch('/api/status').then(r => r.json()),
+    ]);
+    document.getElementById('statusbar').textContent =
+      `Pending: ${status.pending} · Active job: ${status.active_job ?? '—'} · Total: ${status.total_jobs}`;
+    const tbody = document.getElementById('jobs');
+    tbody.innerHTML = jobs.map(j => `
+      <tr>
+        <td>${j.id}</td><td>${j.type}</td><td>${escapeHtml(j.label)}</td>
+        <td class="s-${j.status}">${j.status}</td>
+        <td>${j.width}×${j.height}</td>
+        <td>${j.error ? escapeHtml(j.error) : ''}</td>
+      </tr>`).join('');
+  } catch (e) { /* keep last view on transient errors */ }
+}
+function escapeHtml(s) { return (s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function printText() {
+  const body = {
+    text: document.getElementById('t-text').value,
+    label: document.getElementById('t-label').value,
+    font_size: +document.getElementById('t-size').value,
+    align: document.getElementById('t-align').value,
+    density: +document.getElementById('t-density').value,
+  };
+  await fetch('/api/print/text', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  refresh();
+}
+async function printImage() {
+  const f = document.getElementById('i-file').files[0];
+  if (!f) { alert('Choose an image first.'); return; }
+  const fd = new FormData();
+  fd.append('file', f);
+  fd.append('label', document.getElementById('i-label').value);
+  const thr = document.getElementById('i-threshold').value;
+  if (thr !== '') fd.append('threshold', thr);
+  fd.append('density', document.getElementById('i-density').value);
+  await fetch('/api/print/image', {method:'POST', body: fd});
+  refresh();
+}
+refresh();
+setInterval(refresh, 1500);
+</script>
+</body>
+</html>

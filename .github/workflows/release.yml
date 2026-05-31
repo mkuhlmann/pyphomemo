@@ -1,0 +1,79 @@
+name: Release
+
+# Push a SemVer tag to build binaries and publish a GitHub Release:
+#   git tag v0.2.0 && git push origin v0.2.0
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+" # v1.2.3
+      - "v[0-9]+.[0-9]+.[0-9]+-*" # v1.2.3-rc.1
+
+permissions:
+  contents: write # needed to create/upload the release
+
+jobs:
+  # Fail early if the git tag does not match the version in pyproject.toml.
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches pyproject version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PROJ="$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          echo "tag=$TAG  pyproject=$PROJ"
+          if [ "$TAG" != "$PROJ" ]; then
+            echo "::error::Tag v$TAG does not match pyproject version $PROJ. Bump pyproject.toml before tagging."
+            exit 1
+          fi
+
+  build:
+    needs: check-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+            ext: ""
+          - os: ubuntu-24.04-arm # GitHub-hosted ARM64 Linux runner
+            label: linux-arm64
+            ext: ""
+          # - os: macos-latest
+          #   label: macos-arm64
+          #   ext: ""
+          - os: windows-latest
+            label: windows-x86_64
+            ext: ".exe"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: uv sync --group build
+
+      - name: Build binary
+        run: uv run pyinstaller pyphomemo.spec --noconfirm --distpath dist
+
+      - name: Name + checksum the artifact
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SRC="dist/pyphomemo${{ matrix.ext }}"
+          OUT="pyphomemo-${VERSION}-${{ matrix.label }}${{ matrix.ext }}"
+          mv "$SRC" "$OUT"
+          if command -v sha256sum >/dev/null; then sha256sum "$OUT" > "$OUT.sha256"; else shasum -a 256 "$OUT" > "$OUT.sha256"; fi
+          ls -lh "$OUT" "$OUT.sha256"
+
+      - name: Publish to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            pyphomemo-*-${{ matrix.label }}${{ matrix.ext }}
+            pyphomemo-*-${{ matrix.label }}${{ matrix.ext }}.sha256
